@@ -1,0 +1,1573 @@
+---
+title: 'Predicting occurrence of Diabetes in PIMA Indian Women'
+author: "Abhinav Srinivasan, Edward Rao and Sathish Sakthivelan"
+date: \today
+#classoption: landscape
+output:
+    pdf_document:
+    latex_engine: xelatex
+    css: 
+     - !expr system.file("rmarkdown/templates/html_vignette/resources/vignette.css", package = "rmarkdown")
+    header-includes: 
+      \usepackage{booktabs}
+      \usepackage{enumitem}
+      \setlistdepth{20}
+      \renewlist{compactitem}{itemize}{20}
+      \setlist[compactitem]{label=$\cdot$}
+      \renewlist{enumerate}{enumerate}{20}
+      \setlist[itemize]{label=$\cdot$}
+      \setlist[itemize,1]{label=\textbullet}
+      \setlist[itemize,2]{label=--}
+      \setlist[itemize,3]{label=*}
+      #\usepackage{float}
+      #\floatplacement{table}{H}
+    vignette: >
+     %\VignetteIndexEntry{Recommendations for Rmarkdown}
+     %\VignetteEngine{knitr::rmarkdown}
+     %\VignetteEncoding{UTF-8}
+---
+## Introduction
+
+The data set we've chosen is a diabetes-related data set that was acquired from https://data.world/data-society/PIMA-indians-diabetes-database. The PIMA Indian Diabetes Data set, originally from the National Institute of Diabetes and Digestive and Kidney Diseases, contains information of 768 women under the age of 21 from a population of PIMA Indian heritage near Phoenix, Arizona, USA. The objective of the data set is to diagnostically predict whether or not a 21 year old female has diabetes based on the diagnostic measurements found in the data set.
+
+## Background
+
+Diabetes is a chronic condition in which the blood sugar levels are much higher than normal for a prolonged duration of time after carbohydrate consumption. The root cause of this chronic condition is that the body do not produce Insulin or develops a resistance to insulin, a hormone that breaks carbohydrates into glucose. Diabetes is categorically classified into two types: Type 1 and Type 2.
+
+- Type 1 represents the condition where the pancreatic beta cells do not produce any insulin needed and requires the patient to inject insulin manually. 
+- Type 2 represents the condition where the insulin develops resistance to insulin sensitivity this leading to increased Blood Glucose level in the body. 
+
+Diabetes when diagnosed in women is even more harder than that of on men as it can affect both the mother and their unborn children during pregnancy. Also, Diabetic women have higher risk of having a heart attack, miscarriages. The unborn babies could be born with birth defects. Creating a statistical learning model will help us predict whether a particular PIMA Indian female under 21 years old will develop diabetes based on the predictors provided. If we are able to predict the likely occurrence of diabetes before its onset, We could very likely reduce the risk of diabetes in these females and design a health plan such that they could mitigate those risks and extend their diabetes-free life.
+
+```{r Load Libraries, eval=TRUE, echo=FALSE , tidy=TRUE, warning=FALSE, tidy.opts=list(width.cutoff=70)}
+suppressWarnings(suppressPackageStartupMessages(library(Rcpp)))
+suppressWarnings(suppressPackageStartupMessages(library(pryr)))
+suppressWarnings(suppressPackageStartupMessages(library(tidyverse)))
+suppressWarnings(suppressPackageStartupMessages(library(DataExplorer)))
+suppressWarnings(suppressPackageStartupMessages(library(GGally)))
+suppressWarnings(suppressPackageStartupMessages(library(rstatix)))
+suppressWarnings(suppressPackageStartupMessages(library(knitr)))
+suppressWarnings(suppressPackageStartupMessages(library(kableExtra)))
+suppressWarnings(suppressPackageStartupMessages(library(psych)))
+suppressWarnings(suppressPackageStartupMessages(library(corrplot)))
+suppressWarnings(suppressPackageStartupMessages(library(formatR)))
+suppressWarnings(suppressPackageStartupMessages(library(pastecs)))
+suppressWarnings(suppressPackageStartupMessages(library(pipeR)))
+suppressWarnings(suppressPackageStartupMessages(library(magrittr)))
+suppressWarnings(suppressPackageStartupMessages(library(RColorBrewer)))
+suppressWarnings(suppressPackageStartupMessages(library(ggpubr)))
+suppressWarnings(suppressPackageStartupMessages(library(dplyr)))
+suppressWarnings(suppressPackageStartupMessages(library(BBmisc)))
+suppressWarnings(suppressPackageStartupMessages(library(car)))
+suppressWarnings(suppressPackageStartupMessages(library(ExPanDaR)))
+suppressWarnings(suppressPackageStartupMessages(library(dlookr)))
+suppressWarnings(suppressPackageStartupMessages(library(mice)))
+suppressWarnings(suppressPackageStartupMessages(library(caret)))
+suppressWarnings(suppressPackageStartupMessages(library(pROC)))
+suppressWarnings(suppressPackageStartupMessages(library(MASS)))
+suppressWarnings(suppressPackageStartupMessages(library(timeDate)))
+suppressWarnings(suppressPackageStartupMessages(library(caTools)))
+suppressWarnings(suppressPackageStartupMessages(library(rpart.plot)))
+suppressWarnings(suppressPackageStartupMessages(library(e1071)))
+suppressWarnings(suppressPackageStartupMessages(library(graphics)))
+suppressWarnings(suppressPackageStartupMessages(library(gridExtra)))   
+suppressWarnings(suppressPackageStartupMessages(library(ranger))) 
+suppressWarnings(suppressPackageStartupMessages(library(xtable))) 
+suppressWarnings(suppressPackageStartupMessages(library(cowplot))) 
+suppressWarnings(suppressPackageStartupMessages(library(kernlab))) 
+suppressWarnings(suppressPackageStartupMessages(library(lattice))) 
+```
+```{r setup, echo=FALSE , tidy=TRUE, tidy.opts=list(width.cutoff=70)}
+options(width = 200,
+        scipen = 999,
+        digits=2,
+        yaml.eval.expr = TRUE)
+knitr::opts_chunk$set(comment=NA, 
+                      prompt=FALSE, 
+                      cache=FALSE, 
+                      echo=TRUE, 
+                      results='asis',
+                      tidy.opts=list(width.cutoff=70),
+                      tidy=TRUE)
+summarytools::st_options(bootstrap.css     = FALSE,       
+                         plain.ascii       = FALSE,       
+                         style             = "rmarkdown", 
+                         dfSummary.silent  = TRUE,        
+                         footnote          = NA,          
+                         subtitle.emphasis = FALSE)
+```
+
+## Data
+```{r Retrive Data, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=60) }
+set.seed(77515)
+diabetes_data <- read.csv("https://query.data.world/s/wuuczxs5p75p4ikjytv7bi3e5obr2t", header=TRUE, stringsAsFactors=FALSE)
+names(diabetes_data)[7] <- "DPF"
+names(diabetes_data)[3] <- "BP"
+names(diabetes_data)[4] <- "Skin"
+```
+
+The overview of the sample data shows that we have 9 columns of which one seems to be the Response variable, while others seems to be Predictor variables.
+```{r Sample Data,  eval=TRUE, echo=FALSE  ,tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+knitr::kable(head(diabetes_data), "pipe", digits = 2, caption = 
+"Sample of PIMA Indian Diabetes data set", align = "ccccccccc")
+```
+
+\subsubsection{Data Description} 
+The below table provides the detailed look at all the variables present in the data set. The description and the data type of each variable is presented along with the variable's names. Based on the available information, we can clearly see that as we expected, there is one Response variable and the eight predictor variables.
+
+```{r Data Description, echo=FALSE  ,tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+variable_type <- lapply(diabetes_data, class)
+
+variable_description <- c(
+"Number of times a participant is pregnant",
+"Plasma glucose concentration a 2hr in an oral glucose tolerance test",
+"It consists of Diastolic blood pressure (when blood exerts into arteries between heart)(mmHg)",
+"Triceps skinfold thickness (mm). It concluded by the collagen content",
+"2-hour serum insulin (µU/ml)",
+"Body Mass Index in kg/m^2",
+"Pedigree Diabetes Function: The function that represents how likely they are to get the disease by extrapolating from their ancestor’s history. An appealing attributed used in diabetes prognosis", 
+"Age of participants", 
+"Diabetes class variable, '1' represent the patient is diabetic and '0' represent patient is not diabetic")
+                          
+variable_name <- colnames(diabetes_data)
+
+diabetes_data_variables <- as_tibble(cbind(variable_name, variable_type, variable_description))
+colnames(diabetes_data_variables) <- c("Variable Name","variable Type","Variable Description")
+
+kbl(diabetes_data_variables, 
+    caption = "Variable Description of PIMA Indian Diabetes data set", booktabs = T) %>%
+    kable_styling(latex_options = c("striped", "HOLD_position")) %>%
+    column_spec(3, width = "30em")
+
+```
+
+## Exploratory Data Analysis
+
+\subsubsection{Data Introduction} 
+The data set consists of 768 entries and 9 variables with all predictors are consisted entirely of continuous variables. As seen below, the data set appeared to be clean with all rows are complete, with no missing values and consistent inputs, essentially suggesting that only a minimal data preprocessing may be needed. 
+
+```{r Data Introduction,   fig.width=10, fig.height=5, echo=FALSE  ,tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+diabetes_data_metadata <- t(introduce(diabetes_data))
+kbl(diabetes_data_metadata, caption = "Basic Statistics in Raw Count") %>%
+    kable_styling(latex_options = c("striped", "HOLD_position"))%>%
+    column_spec(1, width = "10cm")
+
+# plot_intro(
+#   diabetes_data,
+#   geom_label_args = list(),
+#   title = 'Basic Statistics in %',
+#   ggtheme = theme_gray(),
+#   theme_config = list())
+# 
+# 
+# plot_missing(
+#   diabetes_data,
+#   group = list(Good = 0.05, OK = 0.4, Bad = 0.8, Remove = 1),
+#   missing_only = FALSE,
+#   geom_label_args = list(),
+#   title = 'Missing Data Profile',
+#   ggtheme = theme_gray(),
+#   theme_config = list(legend.position = c("bottom")))
+```
+
+\subsubsection{Missing Values} 
+Upon further investigation of the data, it was noted that, though we have all the rows filled and no missing values, the data in certain columns represent abnormal values for those biological measurements. The biological measurements like skin thickness, Glucose, BP, Insulin, BMI cannot be zero, while Pregnancies and Outcome can be 0. Thus, we can conclude that the missing values in our data set is represented by zeros. 
+
+By creating a subset with the columns containing abnormal values and quantifying the missing values, We found that we have a staggeringly higher observation of missing data in our data set.
+
+```{r Missing Values, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+diabetes_data_original <- diabetes_data
+
+diabetes_data_missing <- subset(diabetes_data, select = -c(Outcome, Pregnancies))
+
+features_missing_count <- apply(diabetes_data_missing, 2, function(x) sum(x <= 0))
+features_missing <- names(diabetes_data_missing)[ features_missing_count > 0]
+
+missing_rows <- apply(diabetes_data_missing, 1, function(x) sum(x <= 0) >= 1) 
+sum(missing_rows)
+
+diabetes_data_missing[diabetes_data_missing <= 0] <- NA
+diabetes_data[, names(diabetes_data_missing)] <- diabetes_data_missing
+
+kbl(colSums(is.na(diabetes_data_missing)), 
+    caption = "Null Values by Predictor Variables") %>%
+    kable_styling(latex_options = c("striped", "HOLD_position"))
+```
+
+\subsubsection{Multivariate Imputation by Chained Equations}
+
+Due a higher % of missing values in the data, eliminating the missing values will lead to a significant data loss.
+This loss will in turn result in a poor prediction model. We have chosen to perform a Multivariate Imputation by Chained Equations to impute the null values in the data set. For the MICE imputation we decided to consider m = 30 to impute the missing values using Weighted predictive mean matching method.
+
+```{r MICE, echo=FALSE  ,tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+mice_Output <-  mice(diabetes_data[,c(-1,-8,-9)],  method = 'midastouch', m = 30, maxit = 0 )
+diabetes_data_impute <- complete(mice_Output)
+diabetes_data$Glucose <- diabetes_data_impute$Glucose
+diabetes_data$BP <- diabetes_data_impute$BP
+diabetes_data$Skin <- diabetes_data_impute$Skin
+diabetes_data$Insulin <- diabetes_data_impute$Insulin
+diabetes_data$BMI <- diabetes_data_impute$BMI
+diabetes_data$DPF <- diabetes_data_impute$DPF
+```
+
+Once the MICE imputation is completed we reran the initial check to validate if all the null values have be handled, which we were able to confirm.
+```{r Recheck Missing Values,  fig.width=10, fig.height=8, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70), warning=FALSE, results=FALSE}
+
+diabetes_data_missing_new <- subset(diabetes_data, select = -c(Outcome, Pregnancies))
+
+features_missing_count_new <- apply(diabetes_data_missing_new, 2, function(x) sum(x <= 0))
+features_missing_new <- names(diabetes_data_missing_new)[ features_missing_count_new > 0]
+
+missing_rows_new <- apply(diabetes_data_missing_new, 1, function(x) sum(x <= 0) >= 1) 
+sum(missing_rows_new)
+
+diabetes_data_missing_new[diabetes_data_missing_new <= 0] <- NA
+diabetes_data[, names(diabetes_data_missing_new)] <- diabetes_data_missing_new
+
+#kbl(colSums(is.na(diabetes_data_missing_new)), 
+    #caption = "Null Values by Predictor Variables") %>%
+    #kable_styling(latex_options = c("striped", "HOLD_position"))
+```
+## Variables
+
+\subsubsection{Response Variable - Outcome}
+
+```{r Response Variable - Outcome, fig.width=10, fig.height=5, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+diabetes_data$Outcome <- factor(diabetes_data$Outcome)
+ggplot(diabetes_data,aes(Outcome,fill = Outcome)) +
+  geom_bar() + 
+  ggtitle("Distribution of Response variable - Outcome")
+```
+
+The 0 and 1 are binary interpretations of the negative and positive outcomes of diabetes being present. Out of 768 records, we find that 268 women were positively diagnosed as Diabetic and 500 women were tested as non-diabetic. 
+
+\subsubsection{Predictor Variables - Pregnancies}
+
+```{r Predictor Variable - Pregnancies, fig.width=10, fig.height=5, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+violin_Preg <- ggplot(diabetes_data, aes(x = Outcome, y = Pregnancies,fill = Outcome)) +
+  geom_violin() + 
+  geom_boxplot(width = 0.2) +
+  theme(legend.position = "bottom") +
+  ggtitle("No. of pregnancies Vs Diabetes")
+
+density_Preg <- ggplot(diabetes_data, aes(x = Pregnancies, color = Outcome, fill = Outcome)) +
+  geom_density(alpha = 0.8) +
+  theme(legend.position = "bottom") +
+  labs(x = "Pregnancies", y = "Density", title = "Density plot of Pregnancies")
+
+
+gridExtra::grid.arrange(violin_Preg, density_Preg, ncol = 2)
+```
+
+Academically we expect that there is direct correlation between pregnancy and Diabetes. Many women are diagnosed with diabetes for the first time during their pregnancies, called as Gestational Diabetes. Whereas, from the figures above, we do not seem to have a clear relationship between Diabetes and Pregancy.
+
+\subsubsection{Predictor Variables - Glucose}
+
+```{r Predictor Variable - Glucose, fig.width=10, fig.height=5, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+violin_Gluc <- ggplot(diabetes_data, aes(x = Outcome, y = Glucose,fill = Outcome)) +
+  geom_violin() + 
+  geom_boxplot(width = 0.2) +
+  theme(legend.position = "bottom") +
+  ggtitle("Glucose Vs Diabetes")
+
+density_Gluc <- ggplot(diabetes_data, aes(x = Glucose, color = Outcome, fill = Outcome)) +
+  geom_density(alpha = 0.8) +
+  theme(legend.position = "bottom") +
+  labs(x = "Glucose", y = "Density", title = "Density plot of Glucose")
+
+gridExtra::grid.arrange(violin_Gluc, density_Gluc, ncol = 2)
+```
+Glucose and prolonged duration of high sugar levels are primary indicators of diabetes. from the figure above we see that there is a clear difference in glucose level tested in the women who are diabetic and those who are non-diabetic. The density plot shows that there are substantially higher number of individuals who have higher levels of glucose are reported as diabetic. Another interesting thing to note is the normal bell-curve distribution for glucose plot density in individuals without diabetes. Though the density plots of both outcomes are overlapping, we can assume that Glucose to be one of the good predictor for the response.
+
+\subsubsection{Predictor Variables - BP}
+
+```{r Predictor Variable - BP, fig.width=10, fig.height=5, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+violin_BP <- ggplot(diabetes_data, aes(x = Outcome, y = BP,fill = Outcome)) +
+  geom_violin() + 
+  geom_boxplot(width = 0.2) +
+  theme(legend.position = "bottom") +
+  ggtitle("BPVs Diabetes")
+
+density_BP <- ggplot(diabetes_data, aes(x = BP, color = Outcome, fill = Outcome)) +
+  geom_density(alpha = 0.8) +
+  theme(legend.position = "bottom") +
+  labs(x = "BP", y = "Density", title = "Density plot of BP")
+
+gridExtra::grid.arrange(violin_BP, density_BP, ncol = 2)
+```
+Academically, Over time diabetes will damage the arteries and thus causing high blood pressure. Diabetes as such is a cause for high blood pressure and not the otherway around. Our data seems to implicate the same. There seems to be no clear relationship between diabetes and BP, with diabetic patients having only a slightly higher overall BP level than non-diabetic patients. The Density plot of both outcome are almost identical and overlapping each other suggesting that BP may not be a good predictor for the response.
+
+\subsubsection{Predictor Variables - Skin}
+
+```{r Predictor Variable - Skin,fig.width=10, fig.height=5, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+violin_Skin <- ggplot(diabetes_data, aes(x = Outcome, y = Skin,fill = Outcome)) +
+  geom_violin() + 
+  geom_boxplot(width = 0.2) +
+  theme(legend.position = "bottom") +
+  ggtitle("Skin thickness Vs Diabetes")
+
+density_Skin <- ggplot(diabetes_data, aes(x = Skin, color = Outcome, fill = Outcome)) +
+  geom_density(alpha = 0.8) +
+  theme(legend.position = "bottom") +
+  labs(x = "Skin thickness", y = "Density", title = "Density plot of skin thickness")
+
+gridExtra::grid.arrange(violin_Skin, density_Skin, ncol = 2)
+```
+Observations on skin thickness seem to suggest that there seems to be no clear relationship between diabetes and skin thickness. Based on density plot, we see that there might be some relation between them. The range of skin thickness in diabetic patients is thicker than those of non-diabetics, although the concentration remains the same. This could imply skin thickness being an effect and not a cause of diabetes.
+
+\subsubsection{Predictor Variables - Insulin}
+
+```{r Predictor Variable - Insulin, fig.width=10, fig.height=5, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+violin_Insul <- ggplot(diabetes_data, aes(x = Outcome, y = Insulin,fill = Outcome)) +
+  geom_violin() + 
+  geom_boxplot(width = 0.2) + 
+  theme(legend.position = "bottom") +
+  ggtitle("Insulin Vs Diabetes")
+
+density_Insul <- ggplot(diabetes_data, aes(x = Insulin, color = Outcome, fill = Outcome)) +
+  geom_density(alpha = 0.8) +
+  theme(legend.position = "bottom") +
+  labs(x = "Insulin", y = "Density", title = "Density plot of Insulin")
+
+gridExtra::grid.arrange(violin_Insul, density_Insul, ncol = 2)
+```
+Observations on Insulin also seem to suggest that there seems to be no clear relationship between diabetes and serum insulin levels. Insulin levels are also relatively standard, and although the peaks for both diabetic and non-diabetic subjects are relatively low, the patients with diabetes seem to lean towards slightly higher insulin levels. With the insulin being resistant, not all insulin is used up in the breaking down of the insulin hence that could explain the sligthtly higher insulin levels in diabetic women.
+
+\subsubsection{Predictor Variables - BMI} 
+
+```{r Predictor Variable - BMI, fig.width=10, fig.height=5, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+violin_BMI <- ggplot(diabetes_data, aes(x = Outcome, y = BMI,fill = Outcome)) +
+  geom_violin() + 
+  geom_boxplot(width = 0.2) +
+  theme(legend.position = "bottom") +
+  ggtitle("BMI Vs Diabetes")
+
+density_BMI <- ggplot(diabetes_data, aes(x = BMI, color = Outcome, fill = Outcome)) +
+  geom_density(alpha = 0.8) +
+  theme(legend.position = "bottom") +
+  labs(x = "BMI", y = "Density", title = "Density plot of BMI")
+
+gridExtra::grid.arrange(violin_BMI, density_BMI, ncol = 2)
+```
+
+The BMI range for a non-diabetic is about 20-60 where as BMI of a Diabetic is about 25-70. This suggests that the BMI reveals a noticeably higher peak for diabetic patients overall, and indicates that there is a clear relationship between diabetes and BMI that needs to be explored. Density plot makes it 
+
+\subsubsection{Predictor Variables - DPF} 
+
+```{r Predictor Variable - DPF, fig.width=10, fig.height=5, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+violin_DPF <- ggplot(diabetes_data, aes(x = Outcome, y = DPF,fill = Outcome)) +
+  geom_violin() + 
+  geom_boxplot(width = 0.2) +
+  theme(legend.position = "bottom") +
+  ggtitle("DPF of women Vs Diabetes")
+
+density_DPF <- ggplot(diabetes_data, aes(x = DPF, color = Outcome, fill = Outcome)) +
+  geom_density(alpha = 0.8) +
+  theme(legend.position = "bottom") +
+  labs(x = "DPF", y = "Density", title = "Density plot of DPF")
+
+gridExtra::grid.arrange(violin_DPF, density_DPF, ncol = 2)
+```
+
+The Diabetes Pedigree Function, indicated by DPF, is basically a calculated value of diabetic history in relatives to indicate likelihood of diabetes. Interestingly, this diagram supports the measure and its intended function but also demonstrates that many non-diabetic patients also have a higher DPF, which could imply that the measure is not perfect, or simply that diabetes in kin does not translate to diabetes in an individual.
+
+\subsubsection{Predictor Variables - Age}
+
+```{r Predictor Variable - Age, fig.width=10, fig.height=5, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+violin_Age <- ggplot(diabetes_data, aes(x = Outcome, y = Age,fill = Outcome)) +
+  geom_violin() + 
+  geom_boxplot(width = 0.2) +
+  theme(legend.position = "bottom") +
+  ggtitle("Age of women Vs Diabetes")
+
+density_Age <- ggplot(diabetes_data, aes(x = Age, color = Outcome, fill = Outcome)) +
+  geom_density(alpha = 0.8) +
+  theme(legend.position = "bottom") +
+  labs(x = "Age", y = "Density", title = "Density plot of Age")
+
+gridExtra::grid.arrange(violin_Age, density_Age, ncol = 2)
+```
+Age seems to be a very telling indicator of diabetes, and suggests that diabetes becomes more prominent in an individual as they advance in their age. Age is also associate with other previous factors such as Pregnancy and glucose levels suggesting that there might be a possibility for Bi-Variate Associations
+
+\newpage
+## Univariate Analysis
+
+\subsubsection{Descriptive Statistics}
+```{r Descriptive Statistics, fig.width=10, fig.height=8,echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=60)}  
+diabetes_data_summary <- summarytools::descr(diabetes_data, round.digits = 2, order = "preserve")
+
+kbl(diabetes_data_summary, 
+    caption = "Descriptive Statistics",  digits = 2, align = "lcccccccc", booktabs = T) %>%
+kable_styling(full_width = F)  %>% 
+kable_styling(latex_options = c("striped", "HOLD_position")) %>%
+column_spec(1, width = "2cm")
+```
+
+\subsubsection{Histograms}
+```{r Histograms, fig.width=10, fig.height=5, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=60)} 
+plot_histogram(
+  diabetes_data,
+  ggtheme = theme_gray(),
+  theme_config = list(),
+  nrow = 3L,
+  ncol = 3L,
+  parallel = FALSE
+)
+
+```
+The above histograms present a general spread of all the predictor variables and their frequency spread. Visually we find that the Age, DPF, Pregnancies, Insulin are left skewed. BP, BMI and Skin seems to be normal. Glucose seems to be right skewed. To be sure of these assumptions we need to proceed with Shaprio- Wilk's normality test and Q-Q plots to  validate our assumptions.
+
+\subsubsection{Shapiro-Wilk’s normality test}
+
+```{r Shapiro, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=60)}  
+diabetes_data$Outcome <- as.numeric(diabetes_data$Outcome)
+shapiro_diabetes_data <- diabetes_data %>%
+  group_by(Outcome) %>%
+  shapiro_test(Pregnancies, Glucose, BP, Skin, Insulin, BMI, DPF, Age)
+
+kbl(shapiro_diabetes_data, 
+    caption = "Shapiro-Wilk’s normality test for PIMA Indian Diabetes data set",  digits = 3, align = "clcr", booktabs = T) %>%
+kable_styling(full_width = F)  %>% 
+kable_styling(latex_options = c("striped", "HOLD_position")) %>%
+column_spec(4, width = "8cm")
+```
+Shaprio Wilk's test for normality allows us to identify whether the data is normally distributed. From the p-values in the above table it is clear that all predictor variables, except for BP, have a p-value lower than 0.001 suggesting that the sample deviates from normality.
+
+\subsubsection{QQ Plots by Outcomes}
+
+```{r QQ by Outcomes, fig.width=10, fig.height=5, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=60)}  
+qq_diabetes_data <- diabetes_data
+plot_qq(
+  qq_diabetes_data,
+  by = "Outcome",
+  sampled_rows = 100L,
+  geom_qq_args = list(),
+  geom_qq_line_args = list(),
+  title = "Quantile-Quantile Plots by Outcomes",
+  ggtheme = theme_gray(),
+  theme_config = list(),
+  nrow = 3L,
+  ncol = 3L,
+  parallel = FALSE)
+
+```
+Based on the Q-Q plots, we can draw the following inferences for our data set
+
+- The presence stair-step appearance in the Pregnancies and BP Q-Q plot suggests that data values are highly repeated
+- Data distribution for Glucose, BMI and Skin are normal but there are a lot of Outliers.
+- Data distribution for Age, DPF and Insulin shows data is skewed to the Right.
+- We see that the Outliers are present in both the Diabetic and Non-diabetic data.
+- The plot for non-diabetic is more skewed to the right for Age than for the diabetic.
+- BP has no role in both Diabetic and Non-diabetic
+
+\subsubsection{Scatter Plot Matrix}
+
+```{r Scatter Plot Matrix, fig.width=13, fig.height=9,echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=60)}  
+pairs.panels(diabetes_data, 
+             hist.col = "#00AFBB",
+             smooth = TRUE, 
+             scale = FALSE, 
+             density=TRUE,
+             ellipses=TRUE,
+             digits = 2,
+             method="pearson", 
+             pch = 20, 
+             lm=TRUE,
+             cor=TRUE,
+             jiggle=TRUE,
+             factor=2, 
+             show.points=TRUE,
+             rug=TRUE, 
+             breaks = "Sturges",
+             cex.cor=1,
+             wt=NULL,
+             smoother=TRUE,
+             stars=TRUE,
+             ci=TRUE,
+             alpha=.05
+             )
+```
+Scatter matrix show the spread and concentration of each variable. We see that there are correlations that are identified (by stars) as significant. 
+
+
+\newpage
+## Correlation Analysis
+
+```{r Correlation Matrix, fig.width=10, fig.height=10, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=60)}  
+diabetes_data$Outcome <- as.numeric(diabetes_data$Outcome)
+
+corr_diabetes_data <- cor(diabetes_data)
+corrplot.mixed(
+  corr_diabetes_data,
+  lower = "number",
+  upper = "ellipse",
+  tl.pos = c("d", "lt", "n"),
+  diag = c("n", "l", "u"),
+  bg = "white",
+  addgrid.col = NULL,
+  lower.col = NULL,
+  upper.col = NULL,
+  plotCI = c("n", "square", "circle", "rect"),
+  mar = c(0, 0, 0, 0),
+  order = "original",
+)
+```
+
+We notice that the Glucose is highly correlated with the target variables, whereas BP has low correlation values.
+Based on the Scatter Plot matrix and Correlation Analysis, it is clear that there are possible Bi-variate relations that needs to be studied. the following seems to be predominant correlation
+
+- BMI and Skin (0.465)
+- Insulin and Glucose (0.30)
+- Pregnancy and Age (0.544)
+- BP and Age (0.318)
+- BMI and Insulin (0.119)
+- BMI and BP (0.2482)
+
+\newpage
+\subsubsection{Scatter Plots by Glucose}
+
+```{r Scatter Plots, fig.width=10, fig.height=5, echo=FALSE,tidy=TRUE, tidy.opts=list(width.cutoff=60)} 
+plot_scatterplot(
+  diabetes_data,
+  by = "Glucose",
+  sampled_rows = nrow(diabetes_data),
+  geom_point_args = list(),
+  scale_x = NULL,
+  scale_y = NULL,
+  title = "Scatter Plot by Glucose",
+  ggtheme = theme_gray(),
+  theme_config = list(),
+  nrow = 3L,
+  ncol = 3L,
+  parallel = FALSE
+)
+```
+We do see that Glucose plays a major role in interacting with every variable. In other terms, the Blood Glucose level plays a major role in not only predicting the diabetes, it also affects/being affected by the other predictor variables.
+
+\subsubsection{Bi-variate Analysis}
+
+Now we perform Bi-Variate analysis to see how combination of two variables affect the occurrence of Diabetes:
+
+```{r Bi-variate Analysis,  fig.width=10, fig.height=5, echo=FALSE,tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+Scatter_BMI_with_Skin <- ggplot(diabetes_data,aes(x=BMI,y=Skin))+
+  geom_point(aes(color=Outcome))+
+  geom_smooth( method = 'loess',  formula = 'y ~ x')+
+  theme(legend.position = "bottom") +
+  ggtitle("BMI with Skin Thickness Vs Diabetes")
+
+Scatter_Insulin_with_Gluc <- ggplot(diabetes_data,aes(x=Insulin,y=Glucose))+
+  geom_point(aes(color=Outcome))+
+  geom_smooth( method = 'loess',  formula = 'y ~ x')+
+  theme(legend.position = "bottom") +
+  ggtitle("Insulin with Glucose Vs Diabetes")
+
+Scatter_Preg_with_Age <- ggplot(diabetes_data, aes(x = Pregnancies, y = Age)) +
+  geom_point(aes(color=Outcome)) + 
+  geom_smooth( method = 'loess',  formula = 'y ~ x')+
+  theme(legend.position = "bottom") +
+  ggtitle("Pregnancies with Age Vs Diabetes")
+
+Scatter_BP_with_Age <- ggplot(diabetes_data,aes(x=BP,y=Age))+
+  geom_point(aes(color=Outcome))+
+  geom_smooth( method = 'loess',  formula = 'y ~ x')+
+  theme(legend.position = "bottom") +
+  ggtitle("BP with Age Vs Diabetes")
+
+Scatter_BMI_with_Insulin <- ggplot(diabetes_data,aes(x=BMI,y=Insulin))+
+  geom_point(aes(color=Outcome))+
+  geom_smooth( method = 'loess',  formula = 'y ~ x')+
+  theme(legend.position = "bottom") +
+  ggtitle("BMI with Insulin Vs Diabetes")
+
+Scatter_BMI_with_BP <- ggplot(diabetes_data,aes(x=BMI,y=BP))+
+  geom_point(aes(color=Outcome))+
+  geom_smooth( method = 'loess',  formula = 'y ~ x')+
+  theme(legend.position = "bottom") +
+  ggtitle("BMI with BP Vs Diabetes")
+```
+
+```{r Bi-variate plot1,  fig.width=10, fig.height=5, echo=FALSE  ,tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+gridExtra::grid.arrange(Scatter_BMI_with_Skin, Scatter_Insulin_with_Gluc,  ncol = 2)
+```
+
+- Women with low BMI and skin thickness did not have Diabetes
+- Non-diabetic women have lower levels of Glucose and Insulin compared to their Diabetic counterparts who recorded high levels of Glucose and a wide range of Insulin. 
+
+```{r Bi-variate plot2,  fig.width=10, fig.height=5, echo=FALSE  ,tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+gridExtra::grid.arrange(Scatter_Preg_with_Age, Scatter_BP_with_Age, ncol = 2)
+```
+
+- No clear boundary can be established between the diabetic and non-diabetic women based on number of pregnancies and their age.
+- Young women with normal BP did not have Diabetes
+
+```{r Bi-variate plot3,  fig.width=10, fig.height=5, echo=FALSE  ,tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+gridExtra::grid.arrange(Scatter_BMI_with_Insulin, Scatter_BMI_with_BP,   ncol = 2)
+```
+
+- Diabetic women can be differentiated from non-diabetic based on BMI and BP values
+- Women with low BMI and Insulin content did not have Diabetes
+
+\newpage
+## Outliers 
+
+
+The Violin plots, and other plots has constantly showed that there are a lot of outliers in our dataset and needs to be taken care of before 
+algorithm training and testing. 
+\ 
+
+```{r Outliers, fig.width=10, fig.height=6, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=60)}  
+plot_outlier(
+  diabetes_data[,c(-9)],
+  col = "gray", 
+  typographic = TRUE)
+```
+
+From the analysis on the outliers, 
+
+- We find that Outliers did not affect data on Pregnancies, Glucose, BP, DPF or Age.
+- Once the Outliers were removed from the Skin thickness, Insulin and BMI data, the data seems to be normal.
+
+We chose to use IQR to handle the outliers thus making the data training and testing more accurate.
+
+```{r Handling Outliers, fig.width=10, fig.height=6, echo=FALSE, warning=FALSE, results=FALSE, message=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=60)}  
+outliers<-function(df, x){
+  i<-IQR(x)
+  y<-quantile(x, .25)
+  z<-quantile(x, .75)
+  
+  lower<-filter(df, x < (y - (1.5 * i)))
+  greater<-filter(df, x > (z + (1.5 * i)))
+  
+  return(rbind.data.frame(lower,greater))
+}
+
+df_bmi_outliers<-outliers(diabetes_data, diabetes_data$BMI)
+df_glucose_outliers<-outliers(diabetes_data, diabetes_data$Glucose)
+df_preg_outliers<-outliers(diabetes_data, diabetes_data$Pregnancies)
+df_dpf_outliers<-outliers(diabetes_data, diabetes_data$DPF)
+df_age_outliers<-outliers(diabetes_data, diabetes_data$Age)
+df_st_outliers<-outliers(diabetes_data, diabetes_data$Skin)
+df_insulin_outliers<-outliers(diabetes_data, diabetes_data$Insulin)
+df_bp_outliers<-outliers(diabetes_data, diabetes_data$BP)
+
+(a <- which(diabetes_data$BMI %in% boxplot.stats(diabetes_data$BMI)$out))
+(b <- which(diabetes_data$Glucose %in% boxplot.stats(diabetes_data$Glucose)$out))
+(c <- which(diabetes_data$Pregnancies %in% boxplot.stats(diabetes_data$Pregnancies)$out))
+(d <- which(diabetes_data$Skin %in% boxplot.stats(diabetes_data$Skin)$out))
+(e <- which(diabetes_data$Age %in% boxplot.stats(diabetes_data$Age)$out))
+(f <- which(diabetes_data$DiabetesPedigreeFunction %in% boxplot.stats(diabetes_data$DPF)$out))
+(g <- which(diabetes_data$Insulin %in% boxplot.stats(diabetes_data$Insulin)$out))
+(h <- which(diabetes_data$BP %in% boxplot.stats(diabetes_data$BP)$out))
+
+all_outliers <- Reduce(union, list(a,b,c,d, e, f, g, h))
+
+removeOutliers <- function(data, indicesOfAllOutliers) {
+  for (x in 1:nrow(indicesOfAllOutliers)){
+    i = indicesOfAllOutliers[x,]
+    data <- data[-c(i), ]
+  }
+  return(data)
+}
+
+transformedData<-removeOutliers(diabetes_data, as.data.frame(all_outliers))
+diabetes_data <- transformedData
+```
+```{r Splitting the dataset,  fig.width=10, fig.height=8, echo=FALSE  ,tidy=TRUE, tidy.opts=list(width.cutoff=70)}
+
+diabetes_data$Outcome[diabetes_data$Outcome == 2] <- 'pos'
+diabetes_data$Outcome[diabetes_data$Outcome == 1] <- 'neg'
+
+diabetes_data_partition <- caret::createDataPartition(y = diabetes_data$Outcome,
+                                                      times = 1,
+                                                      p = 0.85, 
+                                                      list = FALSE)
+diabetes_data_training <- diabetes_data[diabetes_data_partition,]
+diabetes_data_testing <- diabetes_data[-diabetes_data_partition,]
+
+
+```
+
+\newpage
+## Algorithm Testing
+
+
+For our dataset, we decided to train, test and compare the following statistical learning methods.
+
+- Logistic Regression
+- KNN
+- XGBOOST - eXtreme Gradient BOOSTing
+- Support Vector Machines
+- Random Forest
+- Rpart CART - classification and Regression Decision Trees
+
+In order to do the models, the dataset is split into two: Training and Test data.
+
+- 85% of the dataset (`r nrow(diabetes_data_training)` observations) will be used as Training set which we will use to train the model 
+- 15% of the dataset (`r nrow(diabetes_data_testing)` observations) will be used as Testing set which we will use to test the trained model  
+
+\  
+
+```{r Confusion_Matrix,  fig.width=10, fig.height=8,echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70)}
+
+draw_confusion_matrix <- function(cm) {
+  total <- sum(cm$table)
+  res <- as.numeric(cm$table)
+
+# Generate color gradients. Palettes come from RColorBrewer.
+  greenPalette <- c("#F7FCF5","#E5F5E0","#C7E9C0","#A1D99B","#74C476","#41AB5D","#238B45","#006D2C","#00441B")
+  redPalette <- c("#FFF5F0","#FEE0D2","#FCBBA1","#FC9272","#FB6A4A","#EF3B2C","#CB181D","#A50F15","#67000D")
+  getColor <- function (greenOrRed = "green", amount = 0) 
+    {
+    if (amount == 0)
+      return("#FFFFFF")
+    palette <- greenPalette
+    if (greenOrRed == "red")
+      palette <- redPalette
+    colorRampPalette(palette)(100)[10 + ceiling(90 * amount / total)]
+  }
+
+# set the basic layout
+  layout(matrix(c(1,1,2)))
+  par(mar=c(2,2,2,2))
+  
+  plot(c(100, 345), c(300, 450), type = "n", xlab="", ylab="", xaxt='n', yaxt='n')
+  title('CONFUSION MATRIX', cex.main=2)
+
+# create the matrix 
+  classes = colnames(cm$table)
+  rect(150, 430, 240, 370, col=getColor("green", res[1]))
+  text(195, 435, classes[1], cex=1.2)
+  rect(250, 430, 340, 370, col=getColor("red", res[3]))
+  text(295, 435, classes[2], cex=1.2)
+  text(125, 370, 'Predicted', cex=1.3, srt=90, font=2)
+  text(245, 450, 'Actual', cex=1.3, font=2)
+  rect(150, 305, 240, 365, col=getColor("red", res[2]))
+  rect(250, 305, 340, 365, col=getColor("green", res[4]))
+  text(140, 400, classes[1], cex=1.2, srt=90)
+  text(140, 335, classes[2], cex=1.2, srt=90)
+
+  # add in the cm results
+  text(195, 400, res[1], cex=1.6, font=2, col='white')
+  text(195, 335, res[2], cex=1.6, font=2, col='white')
+  text(295, 400, res[3], cex=1.6, font=2, col='white')
+  text(295, 335, res[4], cex=1.6, font=2, col='white')
+
+  # add in the specifics 
+  plot(c(100, 0), c(100, 0), type = "n", xlab="", ylab="", main = "DETAILS", xaxt='n', yaxt='n')
+  text(10, 85, names(cm$byClass[1]), cex=1.2, font=2)
+  text(10, 70, round(as.numeric(cm$byClass[1]), 6), cex=1.2)
+  text(30, 85, names(cm$byClass[2]), cex=1.2, font=2)
+  text(30, 70, round(as.numeric(cm$byClass[2]), 6), cex=1.2)
+  text(50, 85, names(cm$byClass[5]), cex=1.2, font=2)
+  text(50, 70, round(as.numeric(cm$byClass[5]), 6), cex=1.2)
+  text(70, 85, names(cm$byClass[6]), cex=1.2, font=2)
+  text(70, 70, round(as.numeric(cm$byClass[6]), 6), cex=1.2)
+  text(90, 85, names(cm$byClass[7]), cex=1.2, font=2)
+  text(90, 70, round(as.numeric(cm$byClass[7]), 6), cex=1.2)
+  
+  text(10, 55, names(cm$overall[6]), cex=1.2, font=2)
+  text(10, 40, round(as.numeric(cm$overall[6]), 6), cex=1.4)
+  text(30, 55, names(cm$overall[7]), cex=1.2, font=2)
+  text(30, 40, round(as.numeric(cm$overall[7]), 6), cex=1.4)
+  text(50, 55, names(cm$byClass[3]), cex=1.2, font=2)
+  text(50, 40, round(as.numeric(cm$byClass[3]), 6), cex=1.4)
+  text(70, 55, names(cm$byClass[4]), cex=1.2, font=2)
+  text(70, 40, round(as.numeric(cm$byClass[4]), 6), cex=1.4)
+  text(90, 55, names(cm$byClass[11]), cex=1.2, font=2)
+  text(90, 40, round(as.numeric(cm$byClass[11]), 6), cex=1.4)
+  
+  text(10, 25, names(cm$overall[1]), cex=1.2, font=2)
+  text(10, 10, round(as.numeric(cm$overall[1]), 6), cex=1.4)
+  text(30, 25, names(cm$overall[2]), cex=1.2, font=2)
+  text(30, 10, round(as.numeric(cm$overall[2]), 6), cex=1.4)
+  text(50, 25, names(cm$byClass[8]), cex=1.2, font=2)
+  text(50, 10, round(as.numeric(cm$byClass[8]), 6), cex=1.4)
+  text(70, 25, names(cm$byClass[9]), cex=1.2, font=2)
+  text(70, 10, round(as.numeric(cm$byClass[9]), 6), cex=1.4) 
+  text(90, 25, names(cm$byClass[10]), cex=1.2, font=2)
+  text(90, 10, round(as.numeric(cm$byClass[10]), 6), cex=1.4)   
+  }
+```
+
+\subsubsection{Logistic Regression}
+
+```{r Logistic_Regression,    fig.width=10, fig.height=8, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70), warning=FALSE, results=FALSE, message=FALSE}
+model_logistic_reg <- caret::train(Outcome ~ ., data = diabetes_data_training,
+                                   method = "glm",
+                                   metric = "ROC",
+                                   tuneLength = 10,
+                                   trControl = trainControl(method = "cv",
+                                                            number = 10,
+                                                            classProbs = T, 
+                                                            summaryFunction = twoClassSummary),
+                                   preProcess = c("center","scale","pca"))
+
+model_logistic_reg
+
+kbl(model_logistic_reg$results["ROC"], 
+    caption = "ROC of Linear Regression Model") %>%
+    kable_styling(latex_options = c("striped", "HOLD_position"))
+
+pred_logistic_reg <- predict(model_logistic_reg, diabetes_data_testing)
+pred_prob_logistic_reg <- predict(model_logistic_reg, diabetes_data_testing,
+                                  type = "prob")
+
+cm_logistic_reg <- confusionMatrix(pred_logistic_reg, factor(diabetes_data_testing$Outcome),
+                                   positive = "pos")
+draw_confusion_matrix(cm_logistic_reg)
+
+roc_logistic_reg <- roc(diabetes_data_testing$Outcome, pred_prob_logistic_reg$pos)
+roc_logistic_reg
+```
+```{r Logistic_Regression_ROC,    fig.width=10, fig.height=5, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70), warning=FALSE, results=FALSE, message=FALSE}
+caTools::colAUC(pred_prob_logistic_reg$pos, diabetes_data_testing$Outcome, 
+                plotROC = T)
+```
+
+\  
+
+Based on the Logistic Regression model we see that:
+
+ - The ROC value is `r round(model_logistic_reg$results["ROC"],3)`
+ - The accuracy is `r cm_logistic_reg$overall['Accuracy']`
+ - The area under the curve has a value of `r roc_logistic_reg$auc`
+ - The F1 score is `r cm_logistic_reg$byClass['F1']` 
+ - The Sensitivity is `r cm_logistic_reg$byClass['Sensitivity']`
+ - The Precision is `r cm_logistic_reg$byClass['Precision']`
+
+We get a `r round(cm_logistic_reg$overall['Accuracy']*100)`% accuracy score on the test data. Our Precision for the model stands at `r cm_logistic_reg$byClass['Precision']`. This indicates that `r round(cm_logistic_reg$byClass['Precision']*100)`% of the time our model classified the patients in a high risk category when they actually had a high risk of getting diabetes.
+The Recall/Sensitivity is `r cm_logistic_reg$byClass['Sensitivity']`, implying that `r round(cm_logistic_reg$byClass['Sensitivity']*100)`% of the time people having actually having high risk were classified correctly by our model.
+
+\subsubsection{KNN}
+
+```{r KNN,   fig.width=10, fig.height=8, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70), warning=FALSE, results=FALSE, message=FALSE}
+model_KNN <- caret::train(Outcome ~ ., data = diabetes_data_training,
+                          method = "knn",
+                          metric = "ROC",
+                          tuneGrid = expand.grid(.k = c(3:10)),
+                          trControl = trainControl(method = "cv", 
+                                                   number = 10,
+                                                   classProbs = T, 
+                                                   summaryFunction = twoClassSummary),
+                          preProcess = c("center","scale","pca"))
+
+model_KNN
+
+kbl(model_KNN$results["ROC"], 
+    caption = "ROC of KNN Model") %>%
+    kable_styling(latex_options = c("striped", "HOLD_position"))
+
+pred_KNN <- predict(model_KNN, diabetes_data_testing)
+pred_prob_KNN <- predict(model_KNN, diabetes_data_testing, 
+                         type = "prob")
+
+cm_KNN <- confusionMatrix(pred_KNN, factor(diabetes_data_testing$Outcome),
+                          positive = "pos")
+draw_confusion_matrix(cm_KNN)
+
+roc_KNN <- roc(diabetes_data_testing$Outcome, pred_prob_KNN$pos)
+roc_KNN
+```
+```{r KNN_ROC,    fig.width=10, fig.height=5, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70), warning=FALSE, results=FALSE, message=FALSE}
+caTools::colAUC(pred_prob_KNN$pos, diabetes_data_testing$Outcome,
+                plotROC = T)
+```
+
+\  
+
+Based on the KNN model we see that:
+
+ - The accuracy is `r cm_KNN$overall['Accuracy']`
+ - The area under the curve has a value of `r roc_KNN$auc`
+ - The F1 score is `r cm_KNN$byClass['F1']` 
+ - The Sensitivity is `r cm_KNN$byClass['Sensitivity']`
+ - The Precision is `r cm_KNN$byClass['Precision']`
+ 
+We get a `r round(cm_KNN$overall['Accuracy']*100)`% accuracy score on the test data. Our Precision for the model stands at `r cm_KNN$byClass['Precision']`. This indicates that `r round(cm_KNN$byClass['Precision']*100)`% of the time our model classified the patients in a high risk category when they actually had a high risk of getting diabetes.
+The Recall/Sensitivity is `r cm_KNN$byClass['Sensitivity']`, implying that `r round(cm_KNN$byClass['Sensitivity']*100)`% of the time people having actually having high risk were classified correctly by our model.
+
+\subsubsection{XGBOOST - eXtreme Gradient BOOSTing}
+
+```{r XGBOOST,    fig.width=10, fig.height=8, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70), warning=FALSE, results=FALSE, message=FALSE}
+xgboost_tune_grid  <-  expand.grid(nrounds = 100,
+                                   eta = c(0.03),
+                                   max_depth = 1,
+                                   gamma = 0,
+                                   colsample_bytree = 0.6,
+                                   min_child_weight = 1,
+                                   subsample = 0.5)
+
+model_xgboost <- caret::train(Outcome ~ ., data = diabetes_data_training,
+                         method = "xgbTree",
+                         metric = "ROC",
+                         tuneGrid = xgboost_tune_grid,
+                         trControl = trainControl(method = "cv", 
+                                                  number = 10,
+                                                  classProbs = T, 
+                                                  summaryFunction = twoClassSummary),
+                         preProcess = c("center","scale","pca"))
+
+model_xgboost
+
+kbl(model_xgboost$results["ROC"], 
+    caption = "ROC of eXtreme Gradient BOOSTing Model") %>%
+    kable_styling(latex_options = c("striped", "HOLD_position"))
+
+pred_xgboost <- predict(model_xgboost, diabetes_data_testing)
+pred_prob_xgboost <- predict(model_xgboost, diabetes_data_testing,
+                             type = "prob")
+
+cm_xgboost <- confusionMatrix(pred_xgboost, factor(diabetes_data_testing$Outcome),
+                              positive = "pos")
+draw_confusion_matrix(cm_xgboost)
+
+roc_xgboost <- roc(diabetes_data_testing$Outcome, pred_prob_xgboost$pos)
+roc_xgboost
+```
+```{r xgboost_ROC,    fig.width=10, fig.height=5, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70), warning=FALSE, results=FALSE, message=FALSE}
+caTools::colAUC(pred_prob_xgboost$pos, diabetes_data_testing$Outcome,
+                plotROC = T)
+```
+
+\  
+
+Based on the eXtreme Gradient BOOSTing model we see that:
+
+ - The ROC value is `r round(model_xgboost$results["ROC"],3)`
+ - The accuracy is `r cm_xgboost$overall['Accuracy']`
+ - The area under the curve has a value of `r roc_xgboost$auc`
+ - The F1 score is `r cm_xgboost$byClass['F1']` 
+ - The Sensitivity is `r cm_xgboost$byClass['Sensitivity']`
+ - The Precision is `r cm_xgboost$byClass['Precision']`
+ 
+We get a `r round(cm_xgboost$overall['Accuracy']*100)`% accuracy score on the test data. Our Precision for the model stands at `r cm_xgboost$byClass['Precision']`. This indicates that `r round(cm_xgboost$byClass['Precision']*100)`% of the time our model classified the patients in a high risk category when they actually had a high risk of getting diabetes.
+The Recall/Sensitivity is `r cm_xgboost$byClass['Sensitivity']`, implying that `r round(cm_xgboost$byClass['Sensitivity']*100)`% of the time people having actually having high risk were classified correctly by our model.
+
+\subsubsection{Support Vector Machines}
+
+```{r SVM,  fig.width=10, fig.height=8, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70), warning=FALSE, results=FALSE, message=FALSE}
+model_support_vector <- caret::train(Outcome ~ ., data = diabetes_data_training,
+                         method = "svmLinear",
+                         metric = "ROC",
+                         trControl = trainControl(method = "cv", 
+                                                  number = 10,
+                                                  classProbs = T, 
+                                                  summaryFunction = twoClassSummary),
+                         preProcess = c("center","scale","pca"))
+
+model_support_vector
+
+kbl(model_support_vector$results["ROC"], 
+    caption = "ROC of Support Vector Machines Model") %>%
+    kable_styling(latex_options = c("striped", "HOLD_position"))
+
+pred_support_vector <- predict(model_support_vector, diabetes_data_testing)
+pred_prob_support_vector <- predict(model_support_vector, diabetes_data_testing,
+                                    type = "prob")
+
+cm_support_vector <- confusionMatrix(pred_support_vector,factor(diabetes_data_testing$Outcome),
+                                     positive = "pos")
+draw_confusion_matrix(cm_support_vector)
+
+roc_support_vector <- roc(diabetes_data_testing$Outcome, pred_prob_support_vector$pos)
+roc_support_vector
+```
+```{r support_vector_ROC,    fig.width=10, fig.height=5, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70), warning=FALSE, results=FALSE, message=FALSE}
+caTools::colAUC(pred_prob_support_vector$pos, diabetes_data_testing$Outcome,
+                plotROC = T)
+```
+
+\  
+
+Based on the Support Vector Machines model we see that:
+
+ - The ROC value is `r round(model_support_vector$results["ROC"],3)`
+ - The accuracy is `r cm_support_vector$overall['Accuracy']`
+ - The area under the curve has a value of `r roc_support_vector$auc`
+ - The F1 score is `r cm_support_vector$byClass['F1']` 
+ - The Sensitivity is `r cm_support_vector$byClass['Sensitivity']`
+ - The Precision is `r cm_support_vector$byClass['Precision']`
+
+We get a `r round(cm_support_vector$overall['Accuracy']*100)`% accuracy score on the test data. Our Precision for the model stands at `r cm_support_vector$byClass['Precision']`. This indicates that `r round(cm_support_vector$byClass['Precision']*100)`% of the time our model classified the patients in a high risk category when they actually had a high risk of getting diabetes. The Recall/Sensitivity is `r cm_support_vector$byClass['Sensitivity']`, implying that `r round(cm_support_vector$byClass['Sensitivity']*100)`% of the time people having actually having high risk were classified correctly by our model.
+
+\subsubsection{Random Forest}
+
+```{r Random Forest,    fig.width=10, fig.height=8, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70), warning=FALSE, results=FALSE, message=FALSE}
+
+RF_tune_grid <- expand.grid(mtry = c(3, 5, 7),
+                               min.node.size = c(2, 4, 6),
+                               splitrule = "gini")
+
+model_random_forest <- caret::train(Outcome ~ ., data = diabetes_data_training,
+                                    method = "ranger", 
+                                    metric = "ROC", 
+                                    tuneGrid = RF_tune_grid,
+                                    tuneLength=20,
+                                    trControl=trainControl(method = "cv",
+                                                           number = 10,
+                                                           classProbs = TRUE,
+                                                           summaryFunction = twoClassSummary),
+                                    preProcess = c("center","scale","pca"))
+
+model_random_forest
+
+kbl(model_random_forest$results["ROC"], 
+    caption = "ROC of Random Forests Model") %>%
+    kable_styling(latex_options = c("striped", "HOLD_position"))
+
+pred_random_forest <- predict(model_random_forest, diabetes_data_testing)
+pred_prob_random_forest <- predict(model_random_forest, diabetes_data_testing,
+                                   type = "prob")
+
+cm_random_forest <- confusionMatrix(pred_random_forest, factor(diabetes_data_testing$Outcome),
+                                    positive = "pos")
+draw_confusion_matrix(cm_random_forest)
+
+roc_random_forest <- roc(diabetes_data_testing$Outcome, pred_prob_random_forest$pos)
+roc_random_forest
+```
+```{r RF_ROC,    fig.width=10, fig.height=5, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70), warning=FALSE, results=FALSE, message=FALSE}
+caTools::colAUC(pred_prob_random_forest$pos, diabetes_data_testing$Outcome,
+                plotROC = T)
+```
+
+\  
+
+Based on the Random Forest model we see that:
+
+ - The accuracy is `r cm_random_forest$overall['Accuracy']`
+ - The area under the curve has a value of `r roc_random_forest$auc`
+ - The F1 score is `r cm_random_forest$byClass['F1']` 
+ - The Sensitivity is `r cm_random_forest$byClass['Sensitivity']`
+ - The Precision is `r cm_random_forest$byClass['Precision']`
+ 
+We get a `r round(cm_random_forest$overall['Accuracy']*100)`% accuracy score on the test data. Our Precision for the model stands at `r cm_random_forest$byClass['Precision']`. This indicates that `r round(cm_random_forest$byClass['Precision']*100)`% of the time our model classified the patients in a high risk category when they actually had a high risk of getting diabetes. The Recall/Sensitivity is `r cm_random_forest$byClass['Sensitivity']`, implying that `r round(cm_random_forest$byClass['Sensitivity']*100)`% of the time people having actually having high risk were classified correctly by our model.
+
+\subsubsection{Rpart CART - classification and Regression Decision Trees}
+
+```{r Rpart CART,    fig.width=10, fig.height=8, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70), warning=FALSE, results=FALSE, message=FALSE}
+model_rpart_cart <- caret::train(Outcome ~ ., data = diabetes_data_training,
+                         method = "rpart",
+                         metric = "ROC",
+                         tuneLength = 20,
+                         trControl = trainControl(method = "cv", 
+                                                  number = 10,
+                                                  classProbs = T, 
+                                                  summaryFunction = twoClassSummary))
+
+model_rpart_cart
+
+kbl(model_rpart_cart$results["ROC"], 
+    caption = "ROC of Rpart CART - classification and Regression Decision Trees") %>%
+    kable_styling(latex_options = c("striped", "HOLD_position"))
+
+pred_rpart_cart <- predict(model_rpart_cart, diabetes_data_testing)
+pred_prob_rpart_cart <- predict(model_rpart_cart, diabetes_data_testing,
+                                type = "prob")
+
+cm_rpart_cart <- confusionMatrix(pred_rpart_cart, factor(diabetes_data_testing$Outcome),
+                                 positive = "pos")
+draw_confusion_matrix(cm_rpart_cart)
+
+roc_rpart_cart <- roc(diabetes_data_testing$Outcome, pred_prob_rpart_cart$pos)
+roc_rpart_cart
+```
+```{r rpart_ROC,    fig.width=10, fig.height=5, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70), warning=FALSE, results=FALSE, message=FALSE, message=FALSE}
+caTools::colAUC(pred_prob_rpart_cart$pos, diabetes_data_testing$Outcome,
+                plotROC = T)
+```
+
+\  
+
+Based on the Rpart CART classification and Regression Decision Trees model we see that:
+
+ - The accuracy is `r cm_rpart_cart$overall['Accuracy']`
+ - The area under the curve has a value of `r roc_rpart_cart$auc`
+ - The F1 score is `r cm_rpart_cart$byClass['F1']` 
+ - The Sensitivity is `r cm_rpart_cart$byClass['Sensitivity']`
+ - The Precision is `r cm_rpart_cart$byClass['Precision']`
+ 
+We get a `r round(cm_rpart_cart$overall['Accuracy']*100)`% accuracy score on the test data. Our Precision for the model stands at `r cm_rpart_cart$byClass['Precision']`. This indicates that `r round(cm_rpart_cart$byClass['Precision']*100)`% of the time our model classified the patients in a high risk category when they actually had a high risk of getting diabetes. The Recall/Sensitivity is `r cm_rpart_cart$byClass['Sensitivity']`, implying that `r round(cm_rpart_cart$byClass['Sensitivity']*100)`% of the time people having actually having high risk were classified correctly by our model.
+
+```{r ,  fig.width=10, fig.height=8, echo=FALSE}
+
+plot(model_rpart_cart)
+
+model_rpart_cart$bestTune
+model_rpart_cart$finalModel
+```
+
+\newpage
+
+```{r decision_tree,  fig.width=10, fig.height=8, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70)}
+rpart.plot::rpart.plot(model_rpart_cart$finalModel,
+                       type = 2, 
+                       extra = 2,
+                       under = FALSE,
+                       fallen.leaves = TRUE,
+                       digits = 2, 
+                       varlen = 0, 
+                       faclen = 0, 
+                       roundint = TRUE,
+                       cex = 0.70, 
+                       tweak = 1,
+                       clip.facs = FALSE, 
+                       clip.right.labs = TRUE,
+                       snip = FALSE,
+                       box.palette = "auto", 
+                       shadow.col = 0)
+```
+
+\  
+
+ - We see from the ROC (Cross-Validation) vs Complexity parameter chart that as we hit a threshold of 0.2 on the model complexity, the ROC drastically drops from 0.70 to under 0.60. 
+ - From the Decision Tree diagram, we see that Glucose values of more than 124 mg/dL play a major role in the predicting the probable outcome of Diabetes, more than any other factors and only followed by BMI and Age. Other attributes such as Diabetes Pedigree Function, Pregnancies, Blood Pressure, Skin Thickness and Insulin also contribute to the prediction.
+
+\newpage
+## Model Comparison
+
+Now that we have trained and tested six models, lets compare the results from each model during both Training and Testing phase to see which performed better than the others.
+
+```{r Model Comparison for Training Data,  fig.width=10, fig.height=5, echo=FALSE  ,tidy=TRUE,warning=FALSE, results=FALSE, message=FALSE, tidy.opts=list(width.cutoff=70)}
+model_comp_list <- list(LogisticRegression = model_logistic_reg,
+                        KNN = model_KNN, 
+                        XGBoost = model_xgboost, 
+                        SVM = model_support_vector,
+                        Random_Forest = model_random_forest, 
+                        Rpart = model_rpart_cart)
+resample_list <- resamples(model_comp_list)
+
+theme1 <- trellis.par.get()
+theme1$plot.symbol$col = rgb(.2, .2, .2, .4)
+theme1$plot.symbol$pch = 16
+theme1$plot.line$col = rgb(1, 0, 0, .7)
+theme1$plot.line$lwd <- 2
+
+trellis.par.set(theme1)
+bwplot(resample_list, layout = c(3, 1))
+```
+
+```{r ,  fig.width=10, fig.height=5, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70) ,warning=FALSE, results=FALSE, message=FALSE }
+trellis.par.set(caretTheme())
+dotplot(resample_list, metric = "ROC")
+```
+
+\  
+Based on resampling fit results, we can see that Support Vector Machines model performed best in the training the data set among all of the six statistical learning models.
+
+\newpage
+```{r Model Comparison for Test Data,  fig.width=10, fig.height=8, echo=FALSE  ,tidy=TRUE, tidy.opts=list(width.cutoff=70),warning=FALSE, results=FALSE, message=FALSE}
+
+results_logistic_reg <- c(cm_logistic_reg$byClass['Sensitivity'], 
+                          cm_logistic_reg$byClass['F1'], 
+                          cm_logistic_reg$byClass['Precision'], 
+                          roc_logistic_reg$auc, 
+                          cm_logistic_reg$overall['Accuracy']  )
+
+results_KNN <- c(cm_KNN$byClass['Sensitivity'], 
+                 cm_KNN$byClass['F1'], 
+                 cm_KNN$byClass['Precision'],
+                 roc_KNN$auc, 
+                 cm_KNN$overall['Accuracy']  )
+
+results_xgboost <- c(cm_xgboost$byClass['Sensitivity'], 
+                     cm_xgboost$byClass['F1'], 
+                     cm_xgboost$byClass['Precision'],
+                     roc_xgboost$auc, 
+                     cm_xgboost$overall['Accuracy']  )
+
+results_support_vector <- c(cm_support_vector$byClass['Sensitivity'], 
+                            cm_support_vector$byClass['F1'], 
+                            cm_support_vector$byClass['Precision'],
+                            roc_support_vector$auc, 
+                            cm_support_vector$overall['Accuracy']  )
+
+results_random_forest  <- c(cm_random_forest$byClass['Sensitivity'], 
+                            cm_random_forest$byClass['F1'], 
+                            cm_random_forest$byClass['Precision'],
+                            roc_random_forest$auc, 
+                            cm_random_forest$overall['Accuracy']  )
+
+results_rpart_cart  <- c(cm_rpart_cart$byClass['Sensitivity'], 
+                         cm_rpart_cart$byClass['F1'], 
+                         cm_rpart_cart$byClass['Precision'],
+                         roc_rpart_cart$auc, 
+                         cm_rpart_cart$overall['Accuracy']  )
+
+ 
+results <- data.frame(rbind(results_logistic_reg, 
+                            results_KNN, 
+                            results_xgboost, 
+                            results_support_vector, 
+                            results_random_forest, 
+                            results_rpart_cart))
+names(results) <- c("Recall/Sensitivity", "F1","Precision", "AUC", "Accuracy")
+```
+
+\ 
+
+```{r ,  fig.width=10, fig.height=8, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70),warning=FALSE, results=FALSE, message=FALSE}
+kbl(results %>% arrange(Accuracy),
+    caption = "Model Results Comparison") %>%
+    kable_styling(latex_options = c("striped", "HOLD_position"))
+
+```
+
+```{r Visual Comparison,  fig.width=10, fig.height=5, echo=FALSE  ,tidy=TRUE, tidy.opts=list(width.cutoff=70),warning=FALSE, results=FALSE, message=FALSE}
+accuracy <- data.frame(Model=c("Logistic Regression", 
+                            "KNN", 
+                            "XGBoost", 
+                            "SVM", 
+                            "Random Forest", 
+                            "RPart Decision Tree"),
+                       Accuracy=c(cm_logistic_reg$overall['Accuracy'],
+                                  cm_KNN$overall['Accuracy'],
+                                  cm_xgboost$overall['Accuracy'],
+                                  cm_support_vector$overall['Accuracy'],
+                                  cm_random_forest$overall['Accuracy'],
+                                  cm_rpart_cart$overall['Accuracy'] ))
+ggplot(accuracy,aes(x=Model,y=Accuracy)) + geom_bar(stat='identity') + theme_bw() + ggtitle('Accuracy Comparison of selected Statistical Models')
+```
+
+## Core Algorithm 
+
+We obtain the highest accuracy from the Support Vector Machines model, with the score reaching `r cm_support_vector$overall['Accuracy']`. This implies that our model predicted classified correctly `r round(cm_support_vector$overall['Accuracy']*100)`% of the times.
+
+The Precision score stood at `r cm_support_vector$byClass['Precision']`, implying our model correctly classified observations with high risk in the high risk category `r round(cm_support_vector$byClass['Precision']*100)`% of the times. The Recall stood at `r cm_support_vector$byClass['Sensitivity']`. We also have an F1 score of `r cm_support_vector$byClass['F1']`, which is defined as the harmonic mean of precision and recall and assigns equal weight to both metrics. However, for our analysis it is  more important for the model to have low false negative cases, as it will be dangerous to classify high risk patients in low risk category. Thus, we will prioritize looking individually at both Precision and Recall rather than F1.
+
+Based on all these findings, we have decided to select the Support Vector Machines model as our core model to proceed with tuning and improving the prediction.
+
+\newpage 
+
+## Core Algorithm Parameter Tuning
+
+The Support Vector Machine is a very useful classification technique. SVM methods can handle both linear and non-linear class boundaries. It can be used for both two-class and multi-class classification problems. 
+In real life data, the separation boundary in most datasets is generally nonlinear. Technically, the SVM algorithm perform a non-linear classification using what is called the kernel trick. The most commonly used kernel transformations are polynomial kernel and radial kernel.
+
+Now that we have selected our core algorithm to be Support Vector Machines, we will define the parameters to be tuned and the type of resampling next. 
+
+For our model we will be using 10-fold cross-validation resampling methods. We have also selected ROC as the performance metric for the resampling profile. We have normalized the variables to make their scale comparable before building the SVM classifier by setting the option preProcess = c("center","scale")
+
+Next we are going to fit the data into the following models:
+
+ - SVM Linear 10-fold CV
+ - SVM Linear 10-fold CV Tuned 
+ - SVM Radial kernel
+ - SVM Polynomial kernel
+ 
+For each model, we have made slight adjustments in order to apply alterations to the data training and determine how they improve upon the base core SVM linear testing. 
+For our parameter tuning, we include a parameter that allows us to set the particular values that the main default variables will be using. 
+The radial Kernel function is used for non-linear decision boundary transformation, and we have altered the tuneLength in order to inform the algorithm to use (in our case) 10 different default values. 
+Our polynomial kernel is of similar but otherwise defined in its arbitrary boundary sequencing. Given these models, we will now make statistical statements about their performance differences by collecting the resampling results using 'resamples'
+
+```{r Resampling Fit,  fig.width=10, fig.height=8, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70), warning=FALSE, results=FALSE}
+
+fit_support_vector_linear_cv <- caret::train(Outcome ~ ., data = diabetes_data_training,
+                         method = "svmLinear",
+                         metric = "ROC",
+                         trControl = trainControl(method = "cv", 
+                                                  number = 10,
+                                                  classProbs = T, 
+                                                  summaryFunction = twoClassSummary),
+                         preProcess = c("center","scale","pca"))
+fit_support_vector_linear_cv_tune <- caret::train(Outcome ~ ., data = diabetes_data_training,
+                         method = "svmLinear",
+                         metric = "ROC",
+                         trControl = trainControl(method = "cv", 
+                                                  number = 10,
+                                                  classProbs = T, 
+                                                  summaryFunction = twoClassSummary),
+                         preProcess = c("center","scale","pca"),
+                         tuneGrid = expand.grid(C = seq(0.1, 2, length = 20)))
+fit_support_vector_radial <- caret::train(Outcome ~ ., data = diabetes_data_training,
+                         method = "svmRadial",
+                         metric = "ROC",
+                         trControl = trainControl(method = "cv", 
+                                                  number = 10,
+                                                  classProbs = T, 
+                                                  summaryFunction = twoClassSummary),
+                         preProcess = c("center","scale","pca"),
+                         tuneLength = 10)
+fit_support_vector_polynomial <- caret::train(Outcome ~ ., data = diabetes_data_training,
+                         method = "svmPoly",
+                         metric = "ROC",
+                         trControl = trainControl(method = "cv", 
+                                                  number = 10,
+                                                  classProbs = T, 
+                                                  summaryFunction = twoClassSummary),
+                         preProcess = c("center","scale"),
+                         tuneLength = 4)
+```
+
+```{r Resampling Profile,  fig.width=10, fig.height=8, echo=FALSE ,tidy=FALSE, tidy.opts=list(width.cutoff=70), warning=FALSE, results=TRUE}
+
+resamps <- resamples(list(SVM_Linear = fit_support_vector_linear_cv,
+                          SVM_Linear_Tuned = fit_support_vector_linear_cv_tune,
+                          SVM_Radial = fit_support_vector_radial,
+                          SVM_Polynomial = fit_support_vector_polynomial))
+
+resamps_summary <- summary(resamps)
+
+resamps_summary
+```
+\newpage
+
+We observe the ROC, Sensitivity, and Specificity values for the different models above. Notice the zero values that will not be included.
+We can achive higher ROC, sensitivity and specificity but that comes at a cost. Now that we have the resampling results, we are going to create several lattice plot methods to visualize the resampling distributions: density plots, box-whisker plots and scatterplot matrices. In the below box-whisker plot, each of the SVM models is compared with their respective box-whsiker plots for ROC, Sensitivity and Specificity. 
+\ 
+
+
+```{r Resampling Plots,  fig.width=10, fig.height=8, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70),warning=FALSE, results=FALSE, message=FALSE}
+
+trellis.par.set(theme1)
+bwplot(resamps, layout = c(3, 1))
+```
+\newpage
+```{r ,  fig.width=10, fig.height=5, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70),warning=FALSE, results=FALSE, message=FALSE}
+trellis.par.set(caretTheme())
+dotplot(resamps, metric = "ROC")
+
+trellis.par.set(theme1)
+xyplot(resamps, what = "BlandAltman")
+```
+```{r ,  fig.width=10, fig.height=10, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70),warning=FALSE, results=FALSE, message=FALSE}
+splom(resamps)
+```
+
+Above, we see in the dot-plot that the mean of SVM Polynomial ROC value is the highest. The confidence level for this plot has been set at 0.95. But as mentioned earlier, when Polynomial model is used, we see increased cost.
+we will fit the model to see what is the cost impact next. The subsequent scatterplot matrix is being utilized to compare each of the SVM model depending on their ROC values. 
+
+Since models are fit on the same versions of the training data, it makes more sense to make inferences on the differences between models. In this way we reduce any within-resample correlation that may exist. We can compute the differences, then use a simple t-test to evaluate the null hypothesis to conclude that there is no difference between models. Also, we see that the similarity between linear models and radial with a narrow spread in the ROC difference which is closer to zero.
+
+\newpage
+
+```{r Model Differences,  fig.width=10, fig.height=8, echo=FALSE ,tidy=FALSE, tidy.opts=list(width.cutoff=70),warning=FALSE, results=FALSE, message=FALSE}
+
+difValues <- diff(resamps)
+
+difValues_summary <- summary(difValues)
+
+difValues_summary
+```
+
+\newpage 
+
+```{r Model Difference Plots,  fig.width=10, fig.height=5, echo=FALSE  ,tidy=TRUE, tidy.opts=list(width.cutoff=70),warning=FALSE, results=FALSE, message=FALSE}
+
+trellis.par.set(theme1)
+bwplot(difValues, layout = c(3, 1))
+
+trellis.par.set(caretTheme())
+dotplot(difValues)
+
+```
+
+\ 
+We plot the box-whisker plot below to compare the differences along the same parameters for each SVM model. While the graphs look different, the values are very minute, with 0.2 being the maximum value difference in either direction. And finally, another dot plot is utilized to check and compute the differences. In this case, the confidence level has been readjusted to 0.992 and shows us a difference in the ROC values of each of the models that we have used. We see almost all the differences are higher than 0.05. 
+
+\newpage 
+
+## Model Fittings
+
+Now that we have compared the ROC, Sensitivity and Specificity, let's look at the other metrics to understand how the parameter tuning and the other methods compare to each other.
+
+Initially, we will check the best parameter tuning for each SVM model we are utilizing. After which, we will analyze the results that we have found. Going exclusively on the accuracy we can observe that SVM Linear and SVM Linear tuned models provide us with similar results. But if we consider the F1 score SVM Radical is higher than the rest of the SVM models.
+
+A four-fold plot is used to provide better insights and check the accuracy of the different SVM models. The four-fold plot consists of the Positive and Negative values of Reference and Prediction.  
+
+\subsubsection{SVM Linear CV and SVM Linear CV Parameter Tuned}
+
+```{r SVM-Parameter Tuning,  fig.width=10, fig.height=8, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70),warning=FALSE, results=TRUE, message=FALSE}
+model_support_vector_linear_cv <- caret::train(Outcome ~ ., data = diabetes_data_training,
+                         method = "svmLinear",
+                         metric = "ROC",
+                         trControl = trainControl(method = "cv", 
+                                                  number = 10,
+                                                  classProbs = T, 
+                                                  summaryFunction = twoClassSummary),
+                         preProcess = c("center","scale","pca"))
+
+
+model_support_vector_linear_cv_tune <- caret::train(Outcome ~ ., data = diabetes_data_training,
+                         method = "svmLinear",
+                         metric = "ROC",
+                         trControl = trainControl(method = "cv", 
+                                                  number = 10,
+                                                  classProbs = T, 
+                                                  summaryFunction = twoClassSummary),
+                         preProcess = c("center","scale","pca"),
+                         tuneGrid = expand.grid(C = seq(0.1, 2, length = 20)))
+
+kbl(model_support_vector_linear_cv_tune$bestTune, 
+    caption = "Best Tune Parameter SVM - Linear CV") %>% 
+    kable_styling(latex_options = c("striped", "HOLD_position"))
+```
+
+We see that the for the best tune, the cost parameter C is the minimal at 0.1.
+
+
+```{r ,  fig.width=10, fig.height=8, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70),warning=FALSE, results=TRUE, message=FALSE}
+tibble_support_vector_linear_cv_tune <- as_tibble(model_support_vector_linear_cv_tune$results[which.min(model_support_vector_linear_cv_tune$results[,2]),])
+
+pred_support_vector_linear_cv_tune <- predict(model_support_vector_linear_cv_tune, diabetes_data_testing)
+pred_prob_support_vector_linear_cv_tune <- predict(model_support_vector_linear_cv_tune, diabetes_data_testing,
+                                    type = "prob")
+
+cm_support_vector_linear_cv_tune <- confusionMatrix(pred_support_vector_linear_cv_tune,factor(diabetes_data_testing$Outcome),
+                                     positive = "pos")
+roc_support_vector_linear_cv_tune <- roc(diabetes_data_testing$Outcome, pred_prob_support_vector_linear_cv_tune$pos)
+```
+
+Both the base linear and tuned linear classifications have similar attributes and average means of values, with slight variations and divergences in scope and where the cost parameter of the "tuned" SVM is held tighter at a higher value of 0.5. There should be nearly no changes at all in resulting accuracy.
+
+\subsubsection{SVM Radial Kernel}
+
+```{r SVM-radial basis Kernel,  fig.width=10, fig.height=8, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70),warning=FALSE, results=TRUE, message=FALSE}
+model_support_vector_radial <- caret::train(Outcome ~ ., data = diabetes_data_training,
+                         method = "svmRadial",
+                         metric = "ROC",
+                         trControl = trainControl(method = "cv", 
+                                                  number = 10,
+                                                  classProbs = T, 
+                                                  summaryFunction = twoClassSummary),
+                         preProcess = c("center","scale","pca"),
+                         tuneLength = 10)
+
+kbl(model_support_vector_radial$bestTune, 
+    caption = "Best Tune Parameter SVM - Radial") %>% 
+    kable_styling(latex_options = c("striped", "HOLD_position"))
+
+tibble_support_vector_radial <- as_tibble(model_support_vector_radial$results[which.min(model_support_vector_radial$results[,2]),])
+
+pred_support_vector_radial <- predict(model_support_vector_radial, diabetes_data_testing)
+pred_prob_support_vector_radial <- predict(model_support_vector_radial, diabetes_data_testing,
+                                    type = "prob")
+
+cm_support_vector_radial <- confusionMatrix(pred_support_vector_radial,factor(diabetes_data_testing$Outcome),
+                                     positive = "pos")
+roc_support_vector_radial <- roc(diabetes_data_testing$Outcome, pred_prob_support_vector_radial$pos)
+```
+
+The sigma value determines the "reach" of our training instances, and because of its low value the results of the classification is bound to be more linear. we can see that Radial is a bit pricey compared to Linear 10-fold model.
+
+\subsubsection{SVM Polynomial Kernel}
+
+```{r SVM-polynomial basis Kernel,  fig.width=10, fig.height=8, echo=FALSE , warning=FALSE, error=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=70),warning=FALSE, results=TRUE, message=FALSE}
+
+model_support_vector_polynomial <- caret::train(Outcome ~ ., data = diabetes_data_training,
+                         method = "svmPoly",
+                         metric = "ROC",
+                         trControl = trainControl(method = "cv", 
+                                                  number = 10,
+                                                  classProbs = T,
+                                                  summaryFunction = twoClassSummary),
+                         preProcess = c("center","scale"),
+                         tuneLength = 4)
+
+kbl(model_support_vector_polynomial$bestTune, 
+    caption = "Best Tune Parameter SVM - Polynomial") %>% 
+    kable_styling(latex_options = c("striped", "HOLD_position"))
+
+tibble_support_vector_polynomial<-as_tibble(model_support_vector_polynomial$results[which.min(model_support_vector_polynomial$results[,2]),])
+
+pred_support_vector_polynomial <- predict(model_support_vector_polynomial, diabetes_data_testing)
+pred_prob_support_vector_polynomial <- predict(model_support_vector_polynomial, diabetes_data_testing,
+                                    type = "prob")
+
+cm_support_vector_polynomial <- confusionMatrix(pred_support_vector_polynomial,factor(diabetes_data_testing$Outcome),
+                                     positive = "pos")
+roc_support_vector_polynomial <- roc(diabetes_data_testing$Outcome, pred_prob_support_vector_polynomial$pos)
+
+```
+
+While the outcome should be relatively similar, we can anticipate slight differences due to configuration differences in the models and the preprocessing for c and the tuning options.
+We see that for SVM Polynomial model the cost parameter is much higher at 1 and thus as discussed earlier this suggests that to attain similar or better performance, we will be spending higher cost 
+
+## Parameter Tuning Results Comparison
+
+```{r Parameter Tuning Comparison,  fig.width=10, fig.height=8, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70),warning=FALSE, results=TRUE, message=FALSE}
+results_support_vector_linear_cv <- c(cm_support_vector$byClass['Sensitivity'], 
+                            cm_support_vector$byClass['F1'], 
+                            cm_support_vector$byClass['Precision'],
+                            roc_support_vector$auc, 
+                            cm_support_vector$overall['Accuracy'])
+
+results_support_vector_linear_cv_tune <- c(cm_support_vector_linear_cv_tune$byClass['Sensitivity'], 
+                            cm_support_vector_linear_cv_tune$byClass['F1'], 
+                            cm_support_vector_linear_cv_tune$byClass['Precision'],
+                            roc_support_vector_linear_cv_tune$auc, 
+                            cm_support_vector_linear_cv_tune$overall['Accuracy'] )
+
+results_support_vector_radial <- c(cm_support_vector_radial$byClass['Sensitivity'], 
+                            cm_support_vector_radial$byClass['F1'], 
+                            cm_support_vector_radial$byClass['Precision'],
+                            roc_support_vector_radial$auc, 
+                            cm_support_vector_radial$overall['Accuracy'])
+
+results_support_vector_polynomial  <- c(cm_support_vector_polynomial$byClass['Sensitivity'], 
+                         cm_support_vector_polynomial$byClass['F1'], 
+                         cm_support_vector_polynomial$byClass['Precision'],
+                         roc_support_vector_polynomial$auc, 
+                         cm_support_vector_polynomial$overall['Accuracy'] )
+
+results_core_para_tuning <- data.frame(rbind(results_support_vector_linear_cv, 
+                            results_support_vector_linear_cv_tune, 
+                            results_support_vector_radial, 
+                            results_support_vector_polynomial))
+
+names(results_core_para_tuning) <- c("Recall/Sensitivity", "F1","Precision", "AUC", "Accuracy")
+
+kbl(results_core_para_tuning %>% arrange(Accuracy) , 
+    caption = "Parameter Tuning Results Comparison") %>%
+    kable_styling(latex_options = c("striped", "HOLD_position"))
+
+```
+
+Looking at the results, we see how similar the results are and how this matches up with our prior predictions with parameter tuning. SVM radial appears to be the most different, likely as a result of the processing and exponential nature of radial. As expected, polynomial kernel yields a slightly higher accuracy along with the higher recall, F1, and precision values as linear methods, comparing the runtime cost, it is not cost effective to adapt SVM Polynomial Kernel Model. 
+
+\subsubsection{Accuracy Diagrams}
+
+```{r Visual Parameter Tuning Accuracy Comparison,  fig.width=10, fig.height=5, echo=FALSE ,tidy=TRUE, tidy.opts=list(width.cutoff=70),warning=FALSE, results=TRUE, message=FALSE}
+col <- c("#CC6666", "#99CC99")
+
+graphics::fourfoldplot(cm_support_vector$table, color = col, conf.level = 0.95, 
+                       main = paste("SVM Linear Accuracy(",((cm_support_vector$overall['Accuracy'])*100),"%)", sep = ""))
+
+  
+graphics::fourfoldplot(cm_support_vector_linear_cv_tune$table, color = col, conf.level = 0.95, 
+                       main = paste("SVM Linear Tuned Accuracy(",((cm_support_vector_linear_cv_tune$overall['Accuracy'])*100),"%)", sep = ""))
+  
+graphics::fourfoldplot(cm_support_vector_radial$table, color = col, conf.level = 0.95, 
+                       main = paste("SVM Radial  Accuracy(",((cm_support_vector_radial$overall['Accuracy'])*100),"%)", sep = ""))
+
+graphics::fourfoldplot(cm_support_vector_polynomial$table, color = col, conf.level = 0.95, 
+                       main = paste("SVM Polynomial Accuracy(",(( cm_support_vector_polynomial$overall['Accuracy'])*100),"%)", sep = ""))
+
+```
+
+SVM Linear and SVM Linear Tuned models provide us with a similar accuracy of `r (cm_support_vector$overall['Accuracy']*100)`% and `r (cm_support_vector_linear_cv_tune$overall['Accuracy']*100)`% 
+while SVM Radical and SVM Polynomial has an accuracy of `r (cm_support_vector_radial$overall['Accuracy']*100)`% and `r (cm_support_vector_polynomial$overall['Accuracy']*100)`% respectively. The resulting diagrams will have a very similar appearance with only the False Negative value having slight changes. The single variable value appears in the False Negative sector, where radial actually yields a higher value of 15 comparatively to the 13 returned by the other kernels. The highest of the algorithm accuracies involves tuning in the kernel configuration. Considering all models have similar accuracies, precision and area under the curve, we can choose any of these model for predicting the Diabetic outcome. But cost efficient model will be Best Tuned SVM Linear 10-fold CV model.
+
+## Conclusion
+
+
+The PIMA Indian Diabetes dataset which is a collection of 768 entries organized by 9 variables is used to predict the occurrence of diabetes in PIMA Indian women. This dataset consists of an aggregated compilation of various biometric information of females below 21 years old. Analyzing these parameters allow us to discover trends and then eventually to predict the presence and likelihood of diabetes. We then fit the data into various algorithms, which included Logistic Regression, KNN, XGBOOST, SVM, Random Forest, and Rpart CART.
+\  
+
+At an initial glance, the dataset appears to be simple, consisting of relatively few entries. But through our exploratory data analysis we understood the data better than before and realized that we had zero values, numerous outliers, etc. We used MICE imputation method to replace zero values with imputed values. Then we eliminated outliers through IQR method.
+\ 
+
+During our EDA, we performed numerous univariate analysis and a few bi-variate analyses to understand more about each of the variables involved in the dataset. We found that, each variable is interlinked and has a different effect on determining diabetes. Of all the factors involved, glucose was the one that played the greatest role when interacting with all the other variables. Meanwhile our data also showed that BMI (body mass index), BP (blood pressure), and skin thickness all played a role in diabetes, while other variables like Insulin or DPF (a predictor measure involving occurrence of diabetes in relatives) did not show a significant connection to diabetes. Bi-variate analysis of chosen variables to determine relation to each other and to diabetes were studies next and found that more combined factors played further stronger role in occurrence of diabetes. 
+\  
+
+Our next step was to decide which algorithm to be used for fitting, training, and testing for better prediction of diabetes with high accuracy. In order to begin testing, we first split off 85% of the dataset (`r nrow(diabetes_data_training)` observations) as training data to run through the algorithms and train the model and then used the remaining 15% of the dataset (`r nrow(diabetes_data_testing)` observations) as our testing data that would deliver our results. We chose these values in part to provide sufficient training data for the algorithms to increase accuracy as well as help in performance when compiling in R, despite our relatively smaller database size. 
+\   
+
+Once we trained various models, we compared the precision, recall/sensitivity, F1 score, and accuracy for each of the models to determine which model performed better than the other. Upon validating, we found that the Support Vector Machines model performed better than other models with an accuracy of `r round(cm_support_vector$overall['Accuracy']*100)`% and better Recall and AUC values. Logistic regression came as the closest second.
+\ 
+
+Now that we had our core model identified, we proceeded forward to tune the SVM model to obtain the better accuracy and recall results. We used four different approaches: the linear kernel, tuned linear, radial kernel, and polynomial kernel approaches. Out of the four, while polynomial’s accuracy score was the highest, it also came at a higher runtime cost. Whereas, Linear 10-Fold, Linear 10-Fold best tuned and Radial all produced identical accuracy at much lower runtime cost. Thus, if we had to choose one of the four models, we will choose SVM Linear 10-Fold model for prediction as it has the best accuracy at the lowest cost.
+\ 
+
+To wrap things up, we can make a few brief comments on how the process of interacting closely with this dataset has allowed us to gain a better understanding of a condition that is so prevalent not just in the targeted focus of our dataset but also in the entire world. With the lessons learned from the Coronavirus outbreak and subsequent response, it would be prudent to use those experiences and pay attention to diseases and health conditions that can be just as debilitating, if not as widespread or infectious. As mentioned above, our findings can be used to help in understanding the link between diabetes and some of its causes, and perhaps translate this knowledge into other fields like heart problems or other BMI/blood pressure related diseases.
+
